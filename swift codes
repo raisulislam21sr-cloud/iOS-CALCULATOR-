@@ -1,0 +1,262 @@
+import SwiftUI
+import UIKit
+
+struct CalculatorView: View {
+    
+    @State private var displayText = "0"
+    @State private var historyText = ""
+    @State private var previousValue: String? = nil
+    @State private var currentOperator: String? = nil
+    @State private var resetNext = false
+    @State private var waitingForSecondValue = false
+    @State private var isDirty = false // AC/C logic
+    @State private var expressionText = ""
+    
+    let buttons: [[String]] = [
+        ["⌫","AC","%","÷"],
+        ["7","8","9","×"],
+        ["4","5","6","−"],
+        ["1","2","3","+"],
+        ["⁺/-","0",".","="]
+    ]
+    
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 12) {
+                
+                Spacer()
+                
+                // Display with history
+                ZStack(alignment: .bottomTrailing) {
+                    Text(historyText)
+                        .foregroundColor(Color.gray)
+                        .font(.system(size: 30))
+                        .opacity(historyText.isEmpty ? 0 : 1)
+                        .padding(.trailing, 12)
+                        .padding(.bottom, 60)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                    
+                    Text(displayText)
+                        .foregroundColor(.white)
+                        .font(.system(size: 50, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .padding(.trailing, 12)
+                        .padding(.bottom, 12)
+                }
+                .frame(maxWidth: .infinity, alignment: .bottomTrailing)
+                
+                // Buttons
+                VStack(spacing: 8) {
+                    ForEach(buttons, id: \.self) { row in
+                        HStack(spacing: 8) {
+                            ForEach(row, id: \.self) { button in
+                                Button(action: {
+                                    buttonPressed(button)
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                }) {
+                                    Text(button)
+                                        .font(.system(size: buttonFontSize(button), weight: .medium))
+                                        .foregroundColor(buttonTextColor(button))
+                                        .frame(width: 77, height: 77)
+                                        .background(buttonBackground(button))
+                                        .cornerRadius(77/2)
+                                }
+                                .buttonStyle(ScaleButtonStyle())
+                            }
+                        }
+                    }
+                }
+                .padding(.bottom, 20)
+            }
+            .padding(.horizontal, 12)
+        }
+    }
+    
+    // MARK: - Button Colors
+    func buttonBackground(_ val: String) -> Color {
+        if val == "AC" || val == "C" || val == "⌫" || val == "%" { return Color(.sRGB, red: 0.357, green: 0.357, blue: 0.357) } // gray
+        if ["+", "−", "×", "÷","="].contains(val) { return Color .orange } // operator
+        return Color(.sRGB, red: 0.2, green: 0.2, blue: 0.2) // numbers
+    }
+    
+    func buttonTextColor(_ val: String) -> Color {
+        if ["+", "−", "×", "÷","="].contains(val) { return .white }
+        return .white
+    }
+    
+    func buttonFontSize(_ val: String) -> CGFloat {
+        if ["+", "−", "×", "÷","="].contains(val) { return 43 }
+        if val == "AC" || val == "C" || val == "⌫" || val == "%" || val == "⁺/-" { return 30 }
+        return 33
+    }
+    
+    // MARK: - Button Press Logic
+    func buttonPressed(_ val: String) {
+        switch val {
+        case "AC","C":
+            clearAll()
+        case "⌫":
+            backspace()
+        case "%":
+            percent()
+        case "⁺/-":
+            toggleSign()
+        case "=":
+            calculate()
+        case ".":
+            inputDecimal()
+        case "+","−","×","÷":
+            setOperator(val)
+        default:
+            inputNumber(val)
+        }
+    }
+    
+    // MARK: - Input Number
+    func inputNumber(_ num: String) {
+        if resetNext {
+            displayText = num
+            resetNext = false
+            waitingForSecondValue = false
+        } else {
+            displayText = displayText == "0" ? num : displayText + num
+        }
+        isDirty = true
+        updateClearButton()
+    }
+    
+    // MARK: - Decimal
+    func inputDecimal() {
+        if resetNext {
+            displayText = "0."
+            resetNext = false
+            waitingForSecondValue = false
+        } else if !displayText.contains(".") {
+            displayText += "."
+        }
+        isDirty = true
+        updateClearButton()
+    }
+    
+    // MARK: - AC/C Logic
+    func updateClearButton() {
+        if let button = UIApplication.shared.windows.first?.rootViewController?.view.subviews
+            .compactMap({ $0 as? UIButton })
+            .first(where: { $0.currentTitle == "AC" || $0.currentTitle == "C" }) {
+            button.setTitle(isDirty ? "C" : "AC", for: .normal)
+        }
+    }
+    
+    func clearAll() {
+        if isDirty {
+            displayText = "0"
+            isDirty = false
+        } else {
+            displayText = "0"
+            previousValue = nil
+            currentOperator = nil
+            expressionText = ""
+            waitingForSecondValue = false
+            historyText = ""
+        }
+        resetNext = false
+    }
+    
+    func backspace() {
+        if displayText.count > 1 {
+            displayText.removeLast()
+        } else {
+            displayText = "0"
+        }
+        isDirty = displayText != "0"
+    }
+    
+    func toggleSign() {
+        if displayText != "0" {
+            displayText = displayText.hasPrefix("-") ? String(displayText.dropFirst()) : "-" + displayText
+            isDirty = true
+        }
+    }
+    
+    func percent() {
+        if let val = Double(displayText) {
+            displayText = String(val / 100)
+            isDirty = true
+        }
+    }
+    
+    func setOperator(_ op: String) {
+        if currentOperator != nil && waitingForSecondValue && !isDirty {
+            // replace operator if not typed second value
+            currentOperator = op
+            expressionText = "\(previousValue ?? "0") \(op) "
+            return
+        }
+        
+        if currentOperator != nil && !waitingForSecondValue {
+            calculate()
+        }
+        previousValue = displayText
+        currentOperator = op
+        resetNext = true
+        waitingForSecondValue = true
+        expressionText = "\(previousValue ?? "0") \(op) "
+        isDirty = false
+    }
+    
+    func calculate() {
+        guard let op = currentOperator, let prev = previousValue, !waitingForSecondValue else { return }
+        
+        var result: Double = 0
+        let current = Double(displayText) ?? 0
+        let previous = Double(prev) ?? 0
+        
+        switch op {
+        case "+": result = previous + current
+        case "−": result = previous - current
+        case "×": result = previous * current
+        case "÷": result = current == 0 ? 0 : previous / current
+        default: break
+        }
+        
+        // History
+        historyText = "\(prev) \(op) \(displayText)"
+        
+        displayText = formatResult(result)
+        previousValue = nil
+        currentOperator = nil
+        resetNext = true
+        waitingForSecondValue = false
+        isDirty = false
+    }
+    
+    func formatResult(_ val: Double) -> String {
+        // Limit to 11 digits like iOS
+        if floor(val) == val {
+            let s = String(Int(val))
+            return s.count > 11 ? String(s.prefix(11)) : s
+        } else {
+            let s = String(val)
+            return s.count > 11 ? String(s.prefix(11)) : s
+        }
+    }
+}
+
+// MARK: - Button Scale Animation
+struct ScaleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 1.2 : 1)
+            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Preview
+struct CalculatorView_Previews: PreviewProvider {
+    static var previews: some View {
+        CalculatorView()
+    }
+}
